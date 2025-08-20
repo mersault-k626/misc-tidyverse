@@ -1,0 +1,145 @@
+---
+title: "Beer Production - TidyTuesday w/ David Robinson"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  results = "both"
+)
+```
+
+# Get the Data
+
+```{r}
+library(tidyverse)
+library(broom)
+library(ggthemes)
+library(tidytuesdayR)
+library(readr)
+library(lubridate)
+library(ggridges)
+library(shiny)
+library(tidymetrics)
+library(shinymetrics)
+
+theme_set(theme_light())
+
+brewing_materials <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2020/2020-03-31/brewing_materials.csv') %>%
+  mutate(date = ymd(paste(year, month, 1))) %>%
+  filter(year <2016)
+beer_taxed <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2020/2020-03-31/beer_taxed.csv')
+brewer_size <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2020/2020-03-31/brewer_size.csv')
+beer_states <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2020/2020-03-31/beer_states.csv')
+
+# Or read in with tidytuesdayR package (https://github.com/dslc-io/tidytuesdayR)
+# PLEASE NOTE TO USE 2020 DATA YOU NEED TO USE tidytuesdayR version ? from GitHub
+
+# Either ISO-8601 date or year/week works!
+
+# Install via pak::pak("dslc-io/tidytuesdayR")
+
+tuesdata <- tidytuesdayR::tt_load('2020-03-31')
+
+
+brewing_materials <- tuesdata$brewing_materials
+
+
+brewing_materials <- brewing_materials 
+```
+
+```{r}
+
+head(brewing_materials)
+head(beer_taxed)
+head(brewer_size)
+head(beer_states)
+
+```
+
+
+# Common ingredients used in US beer production
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+# filter for a monthly sample
+
+brewing_materials %>%
+  filter(date == max(date)) %>%
+  filter(!str_detect(material_type, "Total")) %>% # remove redundant rows for total grain products
+  mutate(type = fct_reorder(type, month_current)) %>%
+  ggplot(aes(type, month_current, fill = material_type)) +
+  geom_col() +
+  coord_flip()
+
+# Create time-series by combining month and year into date col
+
+  # All materials
+
+brewing_materials %>%
+  filter(!str_detect(material_type, "Total")) %>%
+  mutate(type = fct_reorder(type, month_current, sum)) %>%
+  ggplot(aes(date, month_current, fill =type)) +
+  geom_col() +
+  scale_y_continuous(labels = scales::comma) +
+  labs(x = "Time",
+       y = "Pounds used in beer production",
+       fill = "Materials") +
+  theme_minimal()
+
+# For aggregates
+
+brewing_materials %>%
+  filter(str_detect(material_type, "Total.*products")) %>%
+  mutate(type = fct_reorder(type, month_current, sum)) %>%
+  ggplot(aes(date, month_current, fill =type)) +
+  geom_col() +
+  scale_y_continuous(labels = scales::comma) +
+  labs(x = "Time",
+       y = "Pounds used in beer production",
+       fill = "Materials") +
+  theme_minimal()
+
+```
+
+
+
+#### TidyMetrics + ShinyMetrics
+
+
+```{r}
+
+brewing_materials %>%
+  filter(!str_detect(material_type, "Total")) %>%
+  cross_by_dimension(material_type, type) %>% # Creates cross-tab with "all" totals for each dimension + grand total
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

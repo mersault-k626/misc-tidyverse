@@ -1,0 +1,263 @@
+---
+title: "TidyTemplate"
+date: 2020-11-03
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+  markdown: 
+    wrap: sentence
+---
+
+# TidyTuesday [2020-11-03]
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(tidytuesdayR)
+library(scales)
+library(ggthemes)
+theme_set(theme_light())
+```
+
+# Data
+
+```{r Load}
+tt <- tt_load('2020-11-03')
+ikea <- tt$ikea
+
+glimpse(ikea)
+
+ikea <- ikea %>%
+  select(-...1) %>%
+  mutate(price_usd = price * .27, # change SAR to USD
+         short_description = str_squish(short_description)) %>%
+  add_count(category, name = "category_total")
+```
+
+# Readme
+
+Take a look at the readme for the weekly data to get insight on the dataset.
+This includes a data dictionary, source, and a link to an article on the data.
+
+```{r Readme, eval = interactive()}
+tt
+```
+
+# Glimpse Data
+
+Take an initial look at the format of the data available.
+
+```{r Glimpse}
+map(tt, glimpse)
+
+ikea %>%
+  count(category, sort = TRUE) %>%
+  mutate(category = fct_reorder(category, n)) %>%
+  ggplot(aes(n, category, fill = category)) +
+  geom_col() +
+  xlab("Quantity") +
+  ylab(NULL) +
+  ggtitle("Ikea Product Category") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+```
+
+```{r echo=TRUE}
+
+library(glue)
+
+library(ggridges)
+
+
+ikea %>%
+  add_count(category, name = "category_total") %>% # add_count() and add_tally() are equivalents to count() and tally() but use mutate() instead of summarise() so that they add a new column with group-wise counts.
+  mutate(category = glue("{category} ({category_total})"),
+         category = fct_reorder(category, price_usd,)) %>%
+  ggplot(aes(price_usd, category, fill = other_colors)) +
+  geom_density_ridges(alpha = .45) +
+  # geom_jitter(width = -0, height = .1, alpha = .25) +
+  scale_x_log10() +
+  ylab(NULL) +
+  xlab("Price (USD) ") +
+  ggtitle("Ikea Product Price by Category") 
+```
+
+Exploring the relation between price, category and `other_color` would be beneficial if one were to develop a predictive model.
+- On log scale in price: The data ain't normally distributed; log-scale makes it easier to see the bi-modality of the price for each category.
+
+### Exploring common name and category
+
+```{r}
+
+ikea %>%
+  mutate(name = fct_lump(name, 20)) %>% # fct_lump() will lump all but the top 20 most common names into "Other"
+  filter(!name == "Other") %>%
+  count(name, category ,sort = TRUE) %>%
+  mutate(name = fct_reorder(name, n, sum),
+         category = fct_reorder(category, n, sum)) %>%
+  ggplot(aes(n, name, fill = category)) +
+  geom_col() +
+  scale_fill_discrete(guide = guide_legend(reverse = TRUE)) +
+  labs(x = "Quantity",
+       y = "Product Name") +
+  theme_clean()
+```
+
+Variations of prodcuts:
+
+The variation of product name is explained by the wide range of family of products under each name.
+For instance, Besta is a storage system that comprises different types of storage selections.
+
+### Tinkering with short description (dimensions)
+
+```{r echo=TRUE}
+
+ikea %>%
+  separate(short_description,
+           c("main_description", "rest"),
+           ", ",
+           extra = "merge",
+           fill = "right") %>%
+  extract(rest, 
+          "dimension_cm", 
+          "([\\d\\-xX]+) cm", 
+          remove = FALSE) %>%
+  unite(category_and_description, category, main_description, sep = " - ") %>%
+  count(category_and_description, sort = TRUE)
+
+```
+
+### Volume
+
+```{r}
+ikea_volume <- ikea %>%
+  select(item_id, name, category, short_description, price_usd, depth, height, width) %>%
+  mutate(volume_m3 = depth * height * width / 1e6) %>% # calculate vol for products with all three dimensions 
+  filter(!is.na(volume_m3),
+         volume_m3 > .001) %>%
+  arrange(desc(volume_m3)) %>%
+  add_count(category, name = "category_total")
+
+
+
+
+ikea_volume %>%
+  mutate(category = glue("{category} ({category_total})"),
+         category = fct_reorder(category, volume_m3)) %>%
+  ggplot(aes(volume_m3, category)) +
+  geom_boxplot() +
+  scale_x_log10() +
+  labs(x =  "Volume of furniture (m3)",
+       y = NULL
+       )
+
+ikea_volume
+```
+
+What is the price per cubic metre?
+
+```{r}
+
+ikea_volume %>%
+  mutate(category = fct_lump(category, 6)) %>%
+  ggplot(aes(volume_m3, price_usd, color = category)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  scale_x_log10()+
+  scale_y_log10() +
+  labs(x ="Volume (m3)",
+       y = "Price (USD)")
+
+ikea_volume %>%
+  mutate(dollar_per_m3 = price_usd / volume_m3) %>%
+  arrange(desc(dollar_per_m3)) %>%
+  ggplot(aes(dollar_per_m3, category)) +
+  geom_density_ridges() +
+  scale_x_log10() +
+  xlab("USD per m3") +
+  ylab("Category") +
+  ggtitle("Distribution of price per m3 by category") +
+  theme_minimal()
+
+```
+
+### Designer
+
+```{r}
+ikea %>%
+  group_by(designer) %>%
+  summarise(n_items = n(),
+            n_names = n_distinct(name),
+            n_category = n_distinct(category)) %>%
+  arrange(desc(n_names))
+```
+
+### Price Prediction Model
+
+```{r}
+library(broom)
+library(ggthemes)
+ikea_volume %>%
+  mutate(category = fct_relevel(category, "Table & desks")) %>%
+  lm(log2(price_usd) ~ log2(volume_m3) + category, data = .) %>%
+  tidy(conf.int = TRUE) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(term = ifelse(term == "log2(volume_m3)", "Item volume (doubling)", term),
+         term = str_remove(term, "category")) %>%
+  mutate(term = fct_reorder(term, estimate)) %>%
+  ggplot(aes(estimate, term)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high)) +
+  geom_vline(xintercept = 0, colour = "red", lty = 2) +
+  labs(x = "Impact on price (relative to Tables & Desk))",
+       title = "Which objects are unusually expensive/inexpensive relative to volume") + 
+  theme_minimal()
+  
+```
+
+This plot shows how different types of furniture are priced relative to their volume, based on a regression model that controls for item size.
+The vertical dashed line represents the baseline price effect for tables & desks**\***.
+
+-   Beds and sofas & armchairs are priced significantly higher than tables & desks, even after accounting for their size**\*\***.
+    Other categories like sideboards, cabinets, and chests of drawers also tend to be more expensive for their volume.
+
+-   In contrast, bookcases & shelving units, children’s furniture, nursery furniture, and especially room dividers are noticeably less expensive than tables & desks, relative to their size.
+
+-   Categories whose confidence intervals cross zero**\*\*\*** (e.g. TV & media furniture, wardrobes, chairs) do not show a statistically significant difference in price from tables & desks.
+
+-   The “Item volume (doubling)” effect**\*\*\*\*** means that as volume doubles, price increases, but by less than double—so larger items have a lower price per unit volume.
+
+In summary, some categories are systematically more or less expensive than would be expected just based on their size, with beds and sofas standing out as unusually pricey and room dividers as unusually cheap.
+
+\* **Why is “tables & desks” the baseline?**\
+In a regression model with categorical variables, you always have to pick one category as a “baseline” (the reference group)—all other categories are compared against it.
+Here, “tables & desks” was chosen because its typical price-per-volume is roughly in the middle of all the categories (i.e., it’s not usually the most expensive or the cheapest per unit volume).
+This makes it a useful reference point: differences from this baseline are easier to interpret as either “pricier than average” or “cheaper than average.” In practice, the choice of baseline doesn’t affect the *fit* of the model, but it *does* affect the interpretation of the coefficients: all other category coefficients tell you the effect *relative to tables & desks*.
+
+\*\* **“Even after accounting for their size” — what does that mean?**\
+This means the model is comparing items *of equal volume* across categories.
+So, beds and sofas aren’t just expensive because they’re physically bigger—their price premium remains even when we hold size constant.
+It’s a “like-for-like” comparison: a bed and a table of the *same size* would still have different expected prices, and the difference is what the coefficient measures.
+
+\*\*\* **Confidence intervals crossing zero: what’s the implication?**\
+If a category’s horizontal error bar crosses the vertical line at zero, it means the model can’t reliably distinguish that category’s price from the baseline (tables & desks).
+“Not statistically significant” means that, given the data, we can’t rule out the possibility that any observed difference is just noise.
+For your background: this is a standard 95% confidence interval—if zero is inside the interval, the null hypothesis (no effect) cannot be rejected.
+
+\*\*\*\* **“Item volume (doubling)” effect: how should I read this?**\
+This is the coefficient for log2(volume), so it’s the expected increase in log2(price) when you double the volume of an item.
+The fact that this coefficient is *less than one* means price rises, but less than proportionally (sublinear scaling).
+In practical terms: the bigger the item, the lower its price per cubic meter, on average.
+This pattern is common in economics and business: bulk or large-size items usually come with a price discount per unit.
+
+```{r}
+# This will save your most recent plot
+ggsave(
+  filename = "My TidyTuesday Plot.png",
+  device = "png"
+)
+```
