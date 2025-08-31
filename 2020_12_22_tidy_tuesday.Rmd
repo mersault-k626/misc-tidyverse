@@ -1,0 +1,219 @@
+---
+title: "TidyTemplate"
+date: "2025-08-31"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+# TidyTuesday
+
+Join the Data Science Learning Community in the weekly #TidyTuesday event!
+Every week we post a raw dataset, a chart or article related to that dataset, and ask you to explore the data.
+While the dataset will be “tamed”, it will not always be tidy! As such you might need to apply various R for Data Science techniques to wrangle the data into a true tidy format.
+The goal of TidyTuesday is to apply your R skills, get feedback, explore other’s work, and connect with the greater #RStats community!
+As such we encourage everyone of all skills to participate!
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  fig.width = 12,
+  fig.height = 8,
+  warning = FALSE,
+  message = FALSE
+)
+```
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(tidytuesdayR)
+library(scales)
+theme_set(ggthemes::theme_clean())
+```
+
+# Load the weekly Data
+
+Download the weekly data and make available in the `tt` object.
+
+```{r Load}
+tt <- tt_load("2020-12-22")
+
+tt$`big-mac` %>%
+  View()
+
+big_mac <- tt$`big-mac` %>%
+  rename(country = name) %>%
+  add_count(country, name = 'country_total') # adds a new column that provide the count of the countries across the table
+
+# updated dataset from The Economist
+
+big_mac_latest <- read_csv("https://github.com/TheEconomist/big-mac-data/raw/refs/heads/master/output-data/big-mac-full-index.csv")
+
+big_mac_latest <- big_mac_latest %>%
+  rename(country = name) %>%
+  add_count(country, name = 'country_total') # adds a new column that provide the count of the countries across the table
+```
+
+
+```{r echo=TRUE, fig.height=16}
+## local price over time
+big_mac %>%
+  filter(country_total == max(country_total)) %>%  # filter for only countries that are present across all years
+  mutate(country = fct_reorder(country, local_price, function(.) max(.) / min(.))) %>% 
+# Reorder country factor levels based on price ratio (max/min) within each country
+# For each country, calculates max(local_prices) / min(local_prices) to get the price ratio
+# Countries are ordered from lowest ratio (most consistent pricing) to highest ratio (most variable pricing)
+# Example: Country with prices $2-$4 has ratio 2.0, country with prices $1-$10 has ratio 10.0
+# Result: Countries with similar min/max prices appear first, countries with large price spreads appear last
+# used here to sort country by price volatility ascending
+# max(.) - min(.) vs max(.) / min(.)
+  # the first one provides the absolute range,
+  # the latter provides range in terms of proportions
+  ggplot(aes(date, local_price, colour = country)) +
+  geom_line(linewidth = 1) +
+  expand_limits(y =0) +
+  ylab('Local price') +
+  xlab('Time') +
+  ggtitle('Big Mac index (local price) over time (2000 – 2020) [Absolute Range]') +
+  facet_wrap(~ country, 
+             scales = 'free_y',
+             ncol = 4) +
+  ggthemes::theme_clean() +
+  theme(legend.position = 'none')
+
+# last / first (range of last by first to better reflect the time-series analysis)
+big_mac %>%
+  filter(country_total == max(country_total)) %>%  # filter for only countries that are present across all years
+  mutate(country = fct_reorder(country, local_price, function(.) last(.) / first(.))) %>% 
+  ggplot(aes(date, local_price, colour = country)) +
+  geom_line(linewidth = 1) +
+  expand_limits(y =0) +
+  ylab('Local price') +
+  xlab('Time') +
+  ggtitle('Big Mac index (local price) over time (2000 – 2020)') +
+  facet_wrap(~ country, 
+             scales = 'free_y',
+             ncol = 4) +
+  ggthemes::theme_clean() +
+  theme(legend.position = 'none')
+
+  # same but newer
+big_mac_latest %>%
+  add_count(country, name = 'country_total') %>% 
+  filter(country_total == max(country_total)) %>%  
+  mutate(country = fct_reorder(country, local_price, function(.) max(.) / min(.))) %>%
+  ggplot(aes(date, local_price, colour = country)) +
+  geom_line(linewidth = 1) +
+  expand_limits(y =0) +
+  ylab('Local price') +
+  xlab('Time') +
+  ggtitle('Big Mac index (local price) over time (2000 – 2025)') +
+  facet_wrap(~ country, scales = 'free_y') +
+  ggthemes::theme_clean() +
+  theme(legend.position = 'none')  
+  
+## USD price over time
+
+big_mac %>%
+  filter(country_total == max(country_total)) %>%
+  mutate(country = fct_reorder(country, dollar_price, function(.) max(.) / min(.))) %>%
+  ggplot(aes(date, dollar_price, colour = country)) +
+  geom_line(linewidth = 1) +
+  expand_limits(y =0) +
+  ylab('Big Mac price (USD)') +
+  xlab('Time') +
+  ggtitle('Big Mac index (USD) over time (2000 – 2020)') +
+  facet_wrap(~ country, 
+             scales = 'free_y',
+             ncol = 4)+
+  ggthemes::theme_clean() +
+  theme(legend.position = 'none')
+ 
+  # same as above with pandemic + Ukrainian war lines added
+
+event_lines <- data.frame(
+  event_date = as.Date(c("2020-03-01", "2022-02-24")),
+  event_label = c("COVID-19 Pandemic", "Russian invasion of Ukraine")
+)
+
+big_mac_latest %>%
+  filter(country_total == max(country_total)) %>% 
+  mutate(country = fct_reorder(country, dollar_price, function(.) max(.) / min(.))) %>%
+  ggplot(aes(date, dollar_price, group = country)) +
+  geom_line(aes(color = country), linewidth = 1, show.legend = FALSE) +   # hide country legend
+  geom_vline(
+    data = event_lines,
+    aes(xintercept = event_date, color = event_label),
+    linewidth = 0.5,
+    show.legend = TRUE
+  ) +
+  expand_limits(y =0) +
+  ylab('Big Mac price (USD)') +
+  xlab('Time') +
+  ggtitle('Big Mac index (USD) over time (2000 – 2025)') +
+  facet_wrap(~ country, scales = 'free_y') +
+  ggthemes::theme_clean() +
+  theme(legend.position = "bottom") +
+  scale_color_manual(
+    name = NULL,
+    values = c(
+      setNames(c("red", "#0057B7"), 
+               c("COVID-19 Pandemic", "Russian invasion of Ukraine"))
+    ),
+    guide = guide_legend(override.aes = list(linetype = "solid", linewidth = .5))
+  )
+
+```
+
+
+```{r}
+
+big_mac_latest %>%
+  filter(country_total == max(country_total)) %>%
+  group_by(country) %>%
+  summarise(big_mac_inflation = round(x = ((last(local_price) - first(local_price)) / first(local_price) * 100), digits = 2)) %>%
+  arrange(desc(big_mac_inflation)) %>%
+  mutate(country = fct_reorder(country, big_mac_inflation)) %>%
+  ggplot(aes(big_mac_inflation, country, fill = big_mac_inflation)) +  
+  geom_col()+
+  geom_text(aes(label = paste0(scales::comma(round(big_mac_inflation, 1)), "%"),
+                hjust = ifelse(big_mac_inflation > 750, 1.05, -0.25)),
+            color = "black"
+            ) +
+  expand_limits(x = 1) +
+  scale_x_log10(expand = c(0, 0),
+                labels = scales::comma) + 
+  scale_fill_gradient(low = "green", high = "red")  +
+  theme(legend.position = 'none') +
+  labs(title = 'Big Mac inflation(% change)',
+       x = 'Inflation rate (%)',
+       y = 'Country')
+
+# Ratio/multiplier method - better for mathematical modeling and log-scale visualizations  
+big_mac_latest %>%
+  filter(country_total == max(country_total)) %>%
+  group_by(country) %>%
+  summarise(big_mac_inflation = round(x = (last(local_price) / first(local_price)), digits = 2)) %>%
+  mutate(country = fct_reorder(country, big_mac_inflation)) %>%
+  ggplot(aes(big_mac_inflation, country, fill = big_mac_inflation)) +
+  geom_col()+
+  geom_text(aes(label = paste0(scales::comma(round(big_mac_inflation, 1)), "x"),
+                hjust = ifelse(big_mac_inflation > 50, 1.05, -0.25)), 
+            color = "black") +  #hjust adds padding between the bar and the text
+  expand_limits(x = 1) +
+  scale_x_log10(expand = c(0, 0),
+                labels = scales::comma)+ # for tickers
+  scale_fill_gradient(low = "green", high = "red")  +
+  theme(legend.position = 'none') +
+  ggtitle('Big Mac inflation (ratio/multiplier)') +
+  xlab('Inflation rate') +
+  ylab('Country')
+
+```
+
+
+```{r}
+
+```
+
+

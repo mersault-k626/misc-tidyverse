@@ -1,0 +1,232 @@
+---
+title: "Beer Production"
+output: html_document
+name: metrics_beer_production
+owner: mersault
+metrics:
+  nb_pounds:
+    title: "# of Pounds produced"
+    description: "Number of pounds used in US beer productions"
+dimensions:
+  material_type:
+    title: Type
+    description: Grain/non-grain
+  material:
+    title: Material
+    description: Malt, syrup, rice, etc
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  results = "both"
+) ################## maybe change material to ingredients, type as primary nomenclature
+```
+
+# Get the Data
+
+```{r}
+library(tidyverse)
+library(broom)
+library(ggthemes)
+library(tidytuesdayR)
+library(readr)
+library(lubridate)
+library(ggridges)
+library(shiny)
+library(tidymetrics)
+library(shinymetrics)
+
+theme_set(theme_light())
+
+brewing_materials <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2020/2020-03-31/brewing_materials.csv')
+beer_taxed <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2020/2020-03-31/beer_taxed.csv')
+brewer_size <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2020/2020-03-31/brewer_size.csv')
+beer_states <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2020/2020-03-31/beer_states.csv')
+
+# Or read in with tidytuesdayR package (https://github.com/dslc-io/tidytuesdayR)
+# PLEASE NOTE TO USE 2020 DATA YOU NEED TO USE tidytuesdayR version ? from GitHub
+
+# Either ISO-8601 date or year/week works!
+
+# Install via pak::pak("dslc-io/tidytuesdayR")
+
+tuesdata <- tidytuesdayR::tt_load('2020-03-31')
+
+
+brewing_materials <- tuesdata$brewing_materials
+
+
+brewing_materials <- brewing_materials  %>%
+  mutate(date = ymd(paste(year, month, 1))) %>%
+  filter(year <2016)
+```
+
+```{r}
+
+head(brewing_materials)
+head(beer_taxed)
+head(brewer_size)
+head(beer_states)
+
+```
+
+# Common ingredients used in US beer production
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+# filter for a monthly sample
+
+brewing_materials %>%
+  filter(date == max(date)) %>%
+  filter(!str_detect(material_type, "Total")) %>% 
+  mutate(type = fct_reorder(type, month_current)) %>%
+  ggplot(aes(type, month_current, fill = material_type)) +
+  geom_col() +
+  coord_flip()
+
+# Create time-series by combining month and year into date col
+
+  # All materials
+
+brewing_materials %>%
+  filter(!str_detect(material_type, "Total")) %>%
+  mutate(type = fct_reorder(type, month_current, sum)) %>%
+  ggplot(aes(date, month_current, fill =type)) +
+  geom_col() +
+  scale_y_continuous(labels = scales::comma) +
+  labs(x = "Time",
+       y = "Pounds used in beer production",
+       fill = "Materials") +
+  theme_minimal()
+
+# For aggregates
+
+brewing_materials %>%
+  filter(str_detect(material_type, "Total.*products")) %>%
+  mutate(type = fct_reorder(type, month_current, sum)) %>%
+  ggplot(aes(date, month_current, fill =type)) +
+  geom_col() +
+  scale_y_continuous(labels = scales::comma) +
+  labs(x = "Time",
+       y = "Pounds used in beer production",
+       fill = "Materials") +
+  theme_minimal() +
+  theme(legend.position = "top")
+
+```
+
+## TidyMetrics + ShinyMetrics
+
+### 1. `tidymetrics::cross_by_dimensions()`
+
+```{r echo=TRUE}
+
+materials_dimensions_crossed <- brewing_materials %>%
+  filter(!str_detect(material_type, "Total")) %>%
+  cross_by_dimensions(material_type, type) %>% # Creates cross-tab with "all" totals for each dimension + grand total/ cross sectioning
+  summarise(nb_pounds = sum(month_current))
+  
+print(materials_dimensions_crossed)
+```
+
+-   Creates additional totals for aggregations or something like that I don't know how to explain just yet lol
+
+### 2. `tidymetrics::cross_by_periods()`
+
+```{r}
+brewing_summarised <-
+  brewing_materials %>%
+  rename(material = type) %>%
+  filter(!str_detect(material_type, "Total")) %>%
+  cross_by_dimensions(material_type, material) %>%
+  cross_by_periods(c("month", "quarter", "year")) %>%
+  summarise(nb_pounds = sum(month_current)) %>%
+  ungroup() 
+  
+```
+
+-   Similar to `cross_by_dimensions()`, but is focused on period.
+-   The argument automatically detects a date/time column; no column argument necessary.
+-   That said it needs an argument for the period to be aggregated — in this instance, it's `c("month", "quarter", "year")`. (p/s it can even go as far as day, heck maybe even time if it suports timestamp idk)
+
+### Graphs
+
+##### 3.1 Time-series graph using cross_by_period/dimension [by month]
+
+```{r}
+brewing_summarised %>%
+  filter(material_type == "All", material == "All", period == "month") %>%
+  ggplot(aes(date, nb_pounds)) +
+  geom_line(size = 1, colour = "red") +
+  scale_y_continuous(labels = scales::comma) +
+  xlab("Time") +
+  ylab("Materials used (lb)") +
+  ggtitle("Materials used in beer production (2008 - 2015)") +
+  theme_light()
+
+```
+
+#### 3.2 Column graph using cross_by_period/dimension [by quarter]
+
+```{r}
+
+brewing_summarised %>%
+  filter(material_type == "All", 
+         period == "quarter",
+         !material == "All") %>% 
+  ggplot(aes(date, nb_pounds, fill = material)) + 
+  geom_col(size = 1) + 
+  scale_y_continuous(labels = scales::comma) + xlab("Time") +
+ylab("Materials used (lb)") + ggtitle("Materials used in beer production (2008 -
+2015)") + 
+  theme_light()
+
+```
+
+#### 3.3 Column graph using cross_by_period/dimension [by year]
+
+```{r}
+brewing_summarised %>%
+  filter(material_type == "All", 
+         period == "year") %>% 
+  mutate(material = fct_reorder(material, nb_pounds, .desc = FALSE)) %>%
+  ggplot(aes(date, nb_pounds, fill = material)) + 
+  geom_col(size = 1) + 
+  scale_y_continuous(labels = scales::comma) + xlab("Time") +
+ylab("Materials used (lb)") + ggtitle("Materials used in beer production (2008 -
+2015)") + 
+  labs(fill = "Materials") +
+  theme_clean() +
+  theme(legend.position = "bottom")
+```
+
+### 4. `shinymetrics::use_metric_scaffold` + `shinymetrics::create_metrics`
+
+```{r}
+# use_metrics_scaffold(brewing_summarised)
+brewing_metrics <- brewing_summarised %>%
+  create_metrics()
+
+```
+```{r}
+library(dplyr)
+brewing_summarised %>% 
+  group_by(material_type, material) %>% 
+  summarise(nb_pounds = sum(nb_pounds), .groups = 'drop')
+library(tidymetrics)
+metrics_tbl <- use_metrics_scaffold(brewing_summarised, "metrics.yaml")
+str(metrics_tbl)
+head(metrics_tbl)
+metrics_tbl <- create_metrics(metrics_tbl)
+```
+
+
+
+
+
+
+
+
+
+
