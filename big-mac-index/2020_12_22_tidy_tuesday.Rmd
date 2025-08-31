@@ -213,7 +213,8 @@ big_mac_latest %>%
 
 
 ```{r}
-
+big_mac_latest %>%
+  filter(country_total == max(country_total)) %>%
 ```
 
 
